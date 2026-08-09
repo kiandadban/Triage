@@ -1,5 +1,5 @@
 import sqlite3
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
 import os
@@ -21,7 +21,7 @@ def init_db():
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS iocs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            indicator TEXT NOT NULL,
+            indicator TEXT NOT NULL UNIQUE,
             type TEXT NOT NULL,
             verdict TEXT,
             malicious_count INTEGER
@@ -37,7 +37,69 @@ class IOC(BaseModel):
     indicator: str
     type: str
 
+@app.get("/")
+def read_root():
+    return {"message": "IOC enricher is running"}
+
+@app.get("/iocs")
+def get_iocs():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, indicator, type, verdict, malicious_count FROM iocs")
+    rows = cursor.fetchall()
+    conn.close()
+    #Return a list of dicts, each dict being an IOC
+    return [
+        {"id": r[0], "indicator": r[1], "type": r[2], "verdict": r[3], "malicious_count": r[4]}
+        for r in rows
+    ]
+
+@app.post("/check")
+def check_ioc(ioc: IOC):
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    #Fetch IOC by indicator
+    cursor.execute("SELECT indicator, type, verdict, malicious_count FROM iocs WHERE indicator = ?", (ioc.indicator,))
+    row = cursor.fetchone()
+
+    # already in DB AND already enriched then just return
+    if row is not None and row[2] is not None:
+        conn.close()
+        return {
+            "indicator": row[0], "type": row[1],
+            "verdict": row[2], "malicious_count": row[3]
+        }
+
+    # otherwise we need to enrich
+    result = check_virustotal(ioc.indicator, ioc.type)
+
+    if row is None:
+        # brand new IOC
+        cursor.execute(
+            "INSERT INTO iocs (indicator, type, verdict, malicious_count) VALUES (?, ?, ?, ?)",
+            (ioc.indicator, ioc.type, result["verdict"], result["malicious_count"])
+        )
+    else:
+        # existed but wasn't enriched
+        cursor.execute(
+            "UPDATE iocs SET verdict = ?, malicious_count = ? WHERE indicator = ?",
+            (result["verdict"], result["malicious_count"], ioc.indicator)
+        )
+
+    conn.commit()
+    conn.close()
+
+    return {
+    "indicator": ioc.indicator,
+    "type": ioc.type,
+    "verdict": result["verdict"],
+    "malicious_count": result["malicious_count"]
+    }
+
+#Helper function that returns virustotal's verdict
 def check_virustotal(indicator: str, ioc_type: str):
+    ioc_type = ioc_type.lower()
     if ioc_type == "ip":
         url = f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
     elif ioc_type == "domain":
@@ -55,51 +117,5 @@ def check_virustotal(indicator: str, ioc_type: str):
     verdict = "malicious" if malicious > 0 else "clean"
     return {"verdict": verdict, "malicious_count": malicious}
 
-@app.get("/")
-def read_root():
-    return {"message": "IOC enricher is running"}
-
-@app.post("/iocs")
-def add_ioc(ioc: IOC):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO iocs (indicator, type) VALUES (?, ?)",
-        (ioc.indicator, ioc.type)
-    )
-    conn.commit()
-    new_id = cursor.lastrowid
-    conn.close()
-    return {"id": new_id, "indicator": ioc.indicator, "type": ioc.type}
-
-@app.get("/iocs")
-def get_iocs():
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, indicator, type FROM iocs")
-    rows = cursor.fetchall()
-    conn.close()
-    #Return a list of dicts, each dict being an IOC
-    return [
-        {"id": r[0], "indicator": r[1], "type": r[2]}
-        for r in rows
-    ]
-
-""" @app.post("/iocs/{ioc_id}/enrich")
-def enrich_ioc(ioc_id: int):
-    conn = sqlite3.connect(DB_NAME)
-    cursor = conn.cursor()
-    cursor.execute("SELECT EXISTS(SELECT 1 FROM users WHERE id = ? LIMIT 1)", (ioc_id,))
-    result = cursor.fetchone()[0] 
-    conn.commit()
-    conn.close()
-
-    # 1. look up the IOC in the database by id
-    # 2. (cache check) if it already has a verdict, return it — no VT call
-    # 3. otherwise call VirusTotal for that indicator
-    # 4. parse the verdict
-    # 5. save the verdict to the database
-    # 6. return it
-
 if __name__ == "__main__":
-    print(check_virustotal("8.8.8.8", "ip")) """
+    print(check_virustotal("8.8.8.8", "ip"))
