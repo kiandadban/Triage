@@ -21,6 +21,7 @@ def init_db():
 
 init_db()
 
+
 #describes the shape of an incoming IOC
 class IOC(BaseModel):
     indicator: str
@@ -42,3 +43,16 @@ def add_ioc(ioc: IOC):
     new_id = cursor.lastrowid
     conn.close()
     return {"id": new_id, "indicator": ioc.indicator, "type": ioc.type}
+
+@app.get("/iocs")
+def get_iocs():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, indicator, type FROM iocs")
+    rows = cursor.fetchall()
+    conn.close()
+    #Return a list of dicts, each dict being an IOC
+    return [
+        {"id": r[0], "indicator": r[1], "type": r[2]}
+        for r in rows
+    ]
