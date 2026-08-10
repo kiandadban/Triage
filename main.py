@@ -38,11 +38,11 @@ class IOC(BaseModel):
     type: str
 
 @app.get("/")
-def read_root():
+def read_root() -> dict[str, str]:
     return {"message": "IOC enricher is running"}
 
 @app.get("/iocs")
-def get_iocs():
+def get_iocs() -> list[dict]:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("SELECT id, indicator, type, verdict, malicious_count FROM iocs")
@@ -54,8 +54,38 @@ def get_iocs():
         for r in rows
     ]
 
+# endpoint for one
 @app.post("/check")
-def check_ioc(ioc: IOC):
+def check_one(ioc: IOC) -> dict:
+    return process_ioc(ioc)
+
+# endpoint for many
+@app.post("/check-batch")
+def check_many(iocs: list[IOC]) -> list[dict]:
+    return [process_ioc(ioc) for ioc in iocs]
+
+#Helper function that returns virustotal's verdict
+def check_virustotal(indicator: str, ioc_type: str) -> dict:
+    ioc_type = ioc_type.lower()
+    if ioc_type == "ip":
+        url = f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
+    elif ioc_type == "domain":
+        url = f"https://www.virustotal.com/api/v3/domains/{indicator}"
+    else:
+        return {"verdict": "unsupported", "malicious_count": None}
+
+    headers = {"x-apikey": VT_API_KEY}
+    response = requests.get(url, headers=headers)
+    data = response.json()
+
+    stats = data["data"]["attributes"]["last_analysis_stats"]
+    malicious = stats["malicious"]
+
+    verdict = "malicious" if malicious > 0 else "clean"
+    return {"verdict": verdict, "malicious_count": malicious}
+
+#Helper function to process and IOC and give a verdict
+def process_ioc(ioc: IOC) -> dict:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
 
@@ -96,26 +126,6 @@ def check_ioc(ioc: IOC):
     "verdict": result["verdict"],
     "malicious_count": result["malicious_count"]
     }
-
-#Helper function that returns virustotal's verdict
-def check_virustotal(indicator: str, ioc_type: str):
-    ioc_type = ioc_type.lower()
-    if ioc_type == "ip":
-        url = f"https://www.virustotal.com/api/v3/ip_addresses/{indicator}"
-    elif ioc_type == "domain":
-        url = f"https://www.virustotal.com/api/v3/domains/{indicator}"
-    else:
-        return {"verdict": "unsupported", "malicious_count": None}
-
-    headers = {"x-apikey": VT_API_KEY}
-    response = requests.get(url, headers=headers)
-    data = response.json()
-
-    stats = data["data"]["attributes"]["last_analysis_stats"]
-    malicious = stats["malicious"]
-
-    verdict = "malicious" if malicious > 0 else "clean"
-    return {"verdict": verdict, "malicious_count": malicious}
 
 if __name__ == "__main__":
     print(check_virustotal("8.8.8.8", "ip"))
