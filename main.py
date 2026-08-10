@@ -81,7 +81,7 @@ def check_virustotal(indicator: str, ioc_type: str) -> dict:
     stats = data["data"]["attributes"]["last_analysis_stats"]
     malicious = stats["malicious"]
 
-    verdict = "malicious" if malicious > 0 else "clean"
+    verdict = derive_verdict(stats)
     return {"verdict": verdict, "malicious_count": malicious}
 
 #Helper function to process and IOC and give a verdict
@@ -126,6 +126,20 @@ def process_ioc(ioc: IOC) -> dict:
     "verdict": result["verdict"],
     "malicious_count": result["malicious_count"]
     }
+
+#Helper to decide if an IOC is malicious
+def derive_verdict(stats) -> str:
+    malicious = stats["malicious"]
+    suspicious = stats["suspicious"]
+    harmless = stats["harmless"]
+    if malicious >= 3:
+        return "malicious"
+    elif malicious >= 1 or suspicious >= 2:
+        return "suspicious"
+    elif harmless == 0:
+        return "undetected"
+    else:
+        return "clean"
 
 if __name__ == "__main__":
     print(check_virustotal("8.8.8.8", "ip"))
