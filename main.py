@@ -1,5 +1,6 @@
 import sqlite3
 from fastapi import FastAPI, HTTPException, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 import requests
 import os
@@ -25,8 +26,7 @@ def init_db():
             indicator TEXT NOT NULL UNIQUE,
             type TEXT NOT NULL,
             verdict TEXT,
-            malicious_count INTEGER,
-            reputation_score INTEGER
+            malicious_count INTEGER
         )
     """)
     conn.commit()
@@ -43,33 +43,23 @@ class IOC(BaseModel):
 class TextInput(BaseModel):
     text: str
 
-@app.get("/")
-def read_root() -> dict[str, str]:
-    return {"message": "IOC enricher is running"}
+@app.get("/", response_class=HTMLResponse)
+def serve_page():
+    return FileResponse("index.html")
 
 @app.get("/iocs")
 def get_iocs() -> list[dict]:
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute("SELECT id, indicator, type, verdict, malicious_count, reputation_score FROM iocs")
+    cursor.execute("SELECT id, indicator, type, verdict, malicious_count FROM iocs")
     rows = cursor.fetchall()
     conn.close()
     #Return a list of dicts, each dict being an IOC
     return [
         {"indicator": r[1], "type": r[2], "verdict": r[3],
-        "malicious_count": r[4], "reputation_score": r[5]}
+        "malicious_count": r[4]}
         for r in rows
     ]
-
-""" # endpoint for one
-@app.post("/check")
-def check_one(ioc: IOC) -> dict:
-    return process_ioc(ioc)
-
-# endpoint for many
-@app.post("/check-batch")
-def check_many(iocs: list[IOC]) -> list[dict]:
-    return [process_ioc(ioc) for ioc in iocs] """
 
 @app.post("/check-file")
 async def check_file(file: UploadFile):
@@ -118,7 +108,7 @@ def check_virustotal(indicator: str, ioc_type: str) -> dict:
     elif ioc_type == "domain":
         url = f"https://www.virustotal.com/api/v3/domains/{indicator}"
     else:
-        return {"verdict": "unsupported", "malicious_count": None, "reputation_score": None}
+        return {"verdict": "unsupported", "malicious_count": None}
 
     headers = {"x-apikey": VT_API_KEY}
     response = requests.get(url, headers=headers)
@@ -127,10 +117,9 @@ def check_virustotal(indicator: str, ioc_type: str) -> dict:
     attributes = data["data"]["attributes"]
     stats = attributes["last_analysis_stats"]
     malicious = stats["malicious"]
-    reputation = attributes.get("reputation", 0)
 
     verdict = derive_verdict(stats)
-    return {"verdict": verdict, "malicious_count": malicious, "reputation": reputation}
+    return {"verdict": verdict, "malicious_count": malicious}
 
 #Helper function to process and IOC and give a verdict
 def process_ioc(ioc: IOC) -> dict:
@@ -139,7 +128,7 @@ def process_ioc(ioc: IOC) -> dict:
 
     #Fetch IOC by indicator
     cursor.execute(
-                "SELECT indicator, type, verdict, malicious_count, reputation_score FROM iocs WHERE indicator = ?", 
+                "SELECT indicator, type, verdict, malicious_count FROM iocs WHERE indicator = ?", 
                 (ioc.indicator,))
     row = cursor.fetchone()
 
@@ -148,8 +137,7 @@ def process_ioc(ioc: IOC) -> dict:
         conn.close()
         return {
             "indicator": row[0], "type": row[1],
-            "verdict": row[2], "malicious_count": row[3],
-            "reputation_score": row[4]
+            "verdict": row[2], "malicious_count": row[3]
         }
 
     # otherwise we need to enrich
@@ -158,8 +146,8 @@ def process_ioc(ioc: IOC) -> dict:
     if row is None:
         # brand new IOC
         cursor.execute(
-            "INSERT INTO iocs (indicator, type, verdict, malicious_count, reputation_score) VALUES (?, ?, ?, ?, ?)",
-            (ioc.indicator, ioc.type, result["verdict"], result["malicious_count"], result["reputation"])
+            "INSERT INTO iocs (indicator, type, verdict, malicious_count) VALUES (?, ?, ?, ?)",
+            (ioc.indicator, ioc.type, result["verdict"], result["malicious_count"])
         )
     else:
         # existed but wasn't enriched
@@ -174,7 +162,6 @@ def process_ioc(ioc: IOC) -> dict:
     return {
         "indicator": ioc.indicator, "type": ioc.type,
         "verdict": result["verdict"], "malicious_count": result["malicious_count"],
-        "reputation_score": result["reputation"]
     }
 
 #Helper to parse uploaded files and get ips or domains
