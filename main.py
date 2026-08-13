@@ -61,7 +61,7 @@ def get_iocs() -> list[dict]:
         for r in rows
     ]
 
-# endpoint for one
+""" # endpoint for one
 @app.post("/check")
 def check_one(ioc: IOC) -> dict:
     return process_ioc(ioc)
@@ -69,7 +69,7 @@ def check_one(ioc: IOC) -> dict:
 # endpoint for many
 @app.post("/check-batch")
 def check_many(iocs: list[IOC]) -> list[dict]:
-    return [process_ioc(ioc) for ioc in iocs]
+    return [process_ioc(ioc) for ioc in iocs] """
 
 @app.post("/check-file")
 async def check_file(file: UploadFile):
@@ -87,6 +87,29 @@ async def check_file(file: UploadFile):
 
     return results
 
+@app.post("/check-text")
+def check_text(payload: TextInput):
+    found = extract_indicators(payload.text)
+    results = []
+    for item in found:
+        ioc = IOC(indicator=item["indicator"], type=item["type"])
+        results.append(process_ioc(ioc))
+    return results
+
+#Helper to decide if an IOC is malicious
+def derive_verdict(stats) -> str:
+    malicious = stats["malicious"]
+    suspicious = stats["suspicious"]
+    harmless = stats["harmless"]
+    if malicious >= 3:
+        return "malicious"
+    elif malicious >= 1 or suspicious >= 2:
+        return "suspicious"
+    elif harmless == 0:
+        return "undetected"
+    else:
+        return "clean"
+    
 #Helper function that returns virustotal's verdict
 def check_virustotal(indicator: str, ioc_type: str) -> dict:
     ioc_type = ioc_type.lower()
@@ -154,20 +177,6 @@ def process_ioc(ioc: IOC) -> dict:
         "reputation_score": result["reputation"]
     }
 
-#Helper to decide if an IOC is malicious
-def derive_verdict(stats) -> str:
-    malicious = stats["malicious"]
-    suspicious = stats["suspicious"]
-    harmless = stats["harmless"]
-    if malicious >= 3:
-        return "malicious"
-    elif malicious >= 1 or suspicious >= 2:
-        return "suspicious"
-    elif harmless == 0:
-        return "undetected"
-    else:
-        return "clean"
-
 #Helper to parse uploaded files and get ips or domains
 def extract_indicators(text: str) -> list[dict]:
     #A list of dict containing the indicator and type
@@ -190,6 +199,3 @@ def extract_indicators(text: str) -> list[dict]:
             indicators.append({"indicator": domain, "type": "domain"})
 
     return indicators
-
-if __name__ == "__main__":
-    print(check_virustotal("8.8.8.8", "ip"))
