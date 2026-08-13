@@ -1,9 +1,10 @@
 import sqlite3
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile
 from pydantic import BaseModel
 import requests
 import os
 from dotenv import load_dotenv
+import re
 
 load_dotenv()
 VT_API_KEY = os.getenv("VT_API_KEY")
@@ -38,6 +39,10 @@ class IOC(BaseModel):
     indicator: str
     type: str
 
+#This is for inputs into a text box
+class TextInput(BaseModel):
+    text: str
+
 @app.get("/")
 def read_root() -> dict[str, str]:
     return {"message": "IOC enricher is running"}
@@ -65,6 +70,22 @@ def check_one(ioc: IOC) -> dict:
 @app.post("/check-batch")
 def check_many(iocs: list[IOC]) -> list[dict]:
     return [process_ioc(ioc) for ioc in iocs]
+
+@app.post("/check-file")
+async def check_file(file: UploadFile):
+    contents = await file.read()
+    text = contents.decode("utf-8")
+
+    # extract indicators from the raw text
+    found = extract_indicators(text)
+
+    # enrich each IOC
+    results = []
+    for item in found:
+        ioc = IOC(indicator=item["indicator"], type=item["type"])
+        results.append(process_ioc(ioc))
+
+    return results
 
 #Helper function that returns virustotal's verdict
 def check_virustotal(indicator: str, ioc_type: str) -> dict:
@@ -146,6 +167,29 @@ def derive_verdict(stats) -> str:
         return "undetected"
     else:
         return "clean"
+
+#Helper to parse uploaded files and get ips or domains
+def extract_indicators(text: str) -> list[dict]:
+    #A list of dict containing the indicator and type
+    seen = set()
+    indicators = []
+
+    #IP addresses: four groups of 1-3 digits separated by dots
+    ip_pattern = r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
+    for ip in re.findall(ip_pattern, text):
+        if ip not in seen:
+            seen.add(ip)
+            indicators.append({"indicator": ip, "type": "ip"})
+
+    #domains: name.tld
+    domain_pattern = r"\b(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}\b"
+    for domain in re.findall(domain_pattern, text):
+        #Add this as a domain only if we haven't seen it and it isn't actually an IP
+        if domain not in seen and not re.fullmatch(ip_pattern, domain):
+            seen.add(domain)
+            indicators.append({"indicator": domain, "type": "domain"})
+
+    return indicators
 
 if __name__ == "__main__":
     print(check_virustotal("8.8.8.8", "ip"))
