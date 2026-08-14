@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Triage — IOC Enricher</title>
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: #11161d;
+      --panel-edge: #1e2630;
+      --ink: #d6e0ea;
+      --ink-dim: #6b7987;
+      --accent: #35d0ba;
+      --clean: #35d0ba;
+      --suspicious: #e0a83d;
+      --malicious: #ff5c6c;
+      --undetected: #6b7987;
+      --mono: "JetBrains Mono", "SF Mono", "Fira Code", Menlo, Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: var(--mono);
+      min-height: 100vh;
+      padding: 32px 24px;
+      background-image:
+        linear-gradient(rgba(53,208,186,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(53,208,186,0.02) 1px, transparent 1px);
+      background-size: 32px 32px;
+    }
+
+    .wrap { max-width: 1100px; margin: 0 auto; }
+
+    header {
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--panel-edge);
+      margin-bottom: 24px;
+    }
+    .logo { font-size: 20px; font-weight: 700; letter-spacing: -0.5px; }
+    .logo .bracket { color: var(--accent); }
+    .tagline { font-size: 12px; color: var(--ink-dim); letter-spacing: 0.5px; }
+    .status { margin-left: auto; font-size: 11px; color: var(--ink-dim); display: flex; align-items: center; gap: 7px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.4;} }
+
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    @media (max-width: 820px) { .grid { grid-template-columns: 1fr; } }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--panel-edge);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-head {
+      padding: 0 8px;
+      border-bottom: 1px solid var(--panel-edge);
+      display: flex;
+      justify-content: space-between;
+      align-items: stretch;
+      min-height: 42px;
+    }
+    .panel-head.plain {
+      padding: 12px 16px;
+      align-items: center;
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      color: var(--ink-dim);
+    }
+    .panel-head .count { color: var(--accent); }
+
+    /* tabs */
+    .tabs { display: flex; }
+    .tab {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--ink-dim);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 0 16px;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab:hover { color: var(--ink); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+    textarea {
+      background: transparent; border: none; color: var(--ink);
+      font-family: var(--mono); font-size: 13px; line-height: 1.7;
+      padding: 16px; resize: none; min-height: 360px; width: 100%; outline: none;
+    }
+    textarea::placeholder { color: #3a4653; }
+
+    /* upload drop zone */
+    .drop {
+      min-height: 360px;
+      margin: 16px;
+      border: 1.5px dashed var(--panel-edge);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      cursor: pointer;
+      color: var(--ink-dim);
+      transition: border-color 0.15s, background 0.15s;
+      text-align: center;
+      padding: 24px;
+    }
+    .drop:hover, .drop.dragover { border-color: var(--accent); background: rgba(53,208,186,0.03); color: var(--ink); }
+    .drop .big { font-size: 13px; color: var(--ink); }
+    .drop .small { font-size: 11px; }
+    .drop .filename { color: var(--accent); font-size: 12px; }
+
+    .hidden { display: none; }
+
+    .results { min-height: 360px; padding: 8px 0; overflow-y: auto; }
+    .empty { color: #3a4653; font-size: 13px; padding: 24px 16px; line-height: 1.7; }
+
+    .row {
+      display: grid; grid-template-columns: 1fr auto auto; gap: 12px;
+      align-items: center; padding: 10px 16px;
+      border-bottom: 1px solid rgba(30,38,48,0.6); font-size: 13px;
+    }
+    .row:hover { background: rgba(53,208,186,0.03); }
+    .indicator { color: var(--ink); word-break: break-all; }
+    .indicator .type { color: var(--ink-dim); font-size: 10px; text-transform: uppercase; margin-left: 8px; letter-spacing: 0.5px; }
+
+    .verdict { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; padding: 3px 10px; border-radius: 4px; font-weight: 600; white-space: nowrap; }
+    .verdict.clean { color: var(--clean); background: rgba(53,208,186,0.1); }
+    .verdict.suspicious { color: var(--suspicious); background: rgba(224,168,61,0.1); }
+    .verdict.malicious { color: var(--malicious); background: rgba(255,92,108,0.12); }
+    .verdict.undetected, .verdict.unsupported { color: var(--undetected); background: rgba(107,121,135,0.1); }
+
+    .meta { color: var(--ink-dim); font-size: 11px; text-align: right; white-space: nowrap; }
+    .meta .flag { color: var(--malicious); }
+
+    .controls { display: flex; gap: 12px; margin-top: 20px; align-items: center; }
+    button.run {
+      background: var(--accent); color: #06231f; border: none; font-family: var(--mono);
+      font-size: 13px; font-weight: 700; letter-spacing: 0.5px; padding: 12px 28px;
+      border-radius: 6px; cursor: pointer; transition: transform 0.08s, box-shadow 0.15s;
+    }
+    button.run:hover { box-shadow: 0 0 20px rgba(53,208,186,0.35); }
+    button.run:active { transform: translateY(1px); }
+    button.run:disabled { opacity: 0.5; cursor: wait; box-shadow: none; }
+    .hint { font-size: 11px; color: var(--ink-dim); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <span class="logo"><span class="bracket">[</span>triage<span class="bracket">]</span></span>
+      <span class="tagline">bulk IOC enrichment</span>
+      <span class="status"><span class="dot"></span>engine online</span>
+    </header>
+
+    <div class="grid">
+      <div class="panel">
+        <div class="panel-head">
+          <div class="tabs">
+            <button class="tab active" id="tabPaste" onclick="setMode('paste')">Paste</button>
+            <button class="tab" id="tabUpload" onclick="setMode('upload')">Upload</button>
+          </div>
+        </div>
+
+        <!-- paste mode -->
+        <textarea id="input" placeholder="Paste anything — a clean list of IPs and domains, or a raw log file.
+Indicators are auto-detected and extracted regardless of format.
+
+45.33.32.156
+google.com
+2026-08-10 [WARN] failed login from 8.8.8.8 ..."></textarea>
+
+        <!-- upload mode -->
+        <div class="drop hidden" id="drop">
+          <div class="big" id="dropText">Drop a log file here</div>
+          <div class="small">or click to browse · .txt .log .csv</div>
+          <div class="filename" id="fileName"></div>
+          <input type="file" id="fileInput" class="hidden" accept=".txt,.log,.csv,.json">
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head plain">
+          <span>Results</span>
+          <span class="count" id="count"></span>
+        </div>
+        <!-- case where user clicks enrich before uploading -->
+        <div class="results" id="results">
+          <div class="empty">No results yet. Paste indicators or upload a log, then run enrichment.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <button class="run" id="btn" onclick="run()">Enrich</button>
+      <span class="hint">Auto-detects IPs and domains · dedupes · caches repeats</span>
+    </div>
+  </div>
+
+  <script>
+    let mode = 'paste';
+    let selectedFile = null;
+
+    function setMode(m) {
+      mode = m;
+      document.getElementById('tabPaste').classList.toggle('active', m === 'paste');
+      document.getElementById('tabUpload').classList.toggle('active', m === 'upload');
+      document.getElementById('input').classList.toggle('hidden', m !== 'paste');
+      document.getElementById('drop').classList.toggle('hidden', m !== 'upload');
+    }
+
+    // file picker
+    const drop = document.getElementById('drop');
+    const fileInput = document.getElementById('fileInput');
+
+    drop.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', () => {
+      if (fileInput.files[0]) selectFile(fileInput.files[0]);
+    });
+    drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('dragover'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+    drop.addEventListener('drop', (e) => {
+      e.preventDefault();
+      drop.classList.remove('dragover');
+      if (e.dataTransfer.files[0]) selectFile(e.dataTransfer.files[0]);
+    });
+
+    function selectFile(file) {
+      selectedFile = file;
+      document.getElementById('dropText').textContent = 'File ready';
+      document.getElementById('fileName').textContent = file.name;
+    }
+
+    // dispatches to the right endpoint based on mode
+    async function run() {
+      const btn = document.getElementById('btn');
+      const results = document.getElementById('results');
+      const count = document.getElementById('count');
+
+      let fetchPromise;
+
+      if (mode === 'paste') {
+        const text = document.getElementById('input').value;
+        if (!text.trim()) {
+          results.innerHTML = '<div class="empty">Nothing to enrich — paste some indicators first.</div>';
+          return;
+        }
+        fetchPromise = fetch('/check-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: text })
+        });
+      } else {
+        if (!selectedFile) {
+          results.innerHTML = '<div class="empty">No file selected — choose a log file first.</div>';
+          return;
+        }
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        fetchPromise = fetch('/check-file', { method: 'POST', body: formData });
+      }
+
+      btn.disabled = true;
+      btn.textContent = 'Enriching…';
+      results.innerHTML = '<div class="empty">Querying threat intelligence…</div>';
+
+      try {
+        const res = await fetchPromise;
+        const data = await res.json();
+        renderResults(data, results, count);
+      } catch (e) {
+        results.innerHTML = '<div class="empty">Request failed — is the server running?</div>';
+        count.textContent = '';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Enrich';
+      }
+    }
+
+    //Display results taken from data (db)
+    function renderResults(data, results, count) {
+      if (!Array.isArray(data) || data.length === 0) {
+        results.innerHTML = '<div class="empty">No indicators found in the input.</div>';
+        count.textContent = '';
+        return;
+      }
+      count.textContent = data.length + ' found';
+      results.innerHTML = data.map(function (r) {
+        const v = r.verdict || 'undetected';
+        const mc = (r.malicious_count === null || r.malicious_count === undefined) ? '–' : r.malicious_count;
+        const flag = (mc !== '–' && mc > 0) ? '<span class="flag">' + mc + '</span> flagged' : mc + ' flagged';
+        return '<div class="row">' +
+          '<div class="indicator">' + escapeHtml(r.indicator) + '<span class="type">' + escapeHtml(r.type) + '</span></div>' +
+          '<div class="verdict ' + v + '">' + v + '</div>' +
+          '<div class="meta">' + flag + '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    //prevent XSS injections by turning dangerous characters into HTML character entities
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c];
+      });
+    }
+  </script>
+</body>
+</html>
