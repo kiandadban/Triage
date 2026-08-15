@@ -36,14 +36,17 @@ Triage needs your own VirusTotal API key (the free tier works). It is a local to
    source .venv/bin/activate        # Windows: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
+   > Use `python3` on macOS/Linux if `python` doesn't work.
 
 3. **Add your VirusTotal API key**
 
-   Create a `.env` file in the project root:
-   ```
-   VT_API_KEY=your_key_here
-   ```
-   Get a key from your VirusTotal account under API Key.
+   Get a key from your VirusTotal account under ***API Key***.
+   
+   Create a `.env` file in the project root with your key:
+```bash
+   echo "VT_API_KEY=your_key_here" > .env
+```
+   
 
 4. **Run it**
    ```bash
