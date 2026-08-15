@@ -40,7 +40,7 @@ Triage needs your own VirusTotal API key (the free tier works). It is a local to
 
 3. **Add your VirusTotal API key**
 
-   Get a key from your VirusTotal account under ***API Key***.
+   Get a free key from your VirusTotal account under ***API Key***.
    
    Create a `.env` file in the project root with your key:
 ```bash
