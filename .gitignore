@@ -1,0 +1,6 @@
+.venv
+.env
+__pycache__
+iocs.db
+test.log
+.DS_Store
